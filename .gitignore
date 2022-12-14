@@ -163,5 +163,5 @@ cython_debug/
 .schematic
 schematics/*
 
-# Custom stuff
-scraper.ipynb
+# Omit token for scraping
+auth.json
