@@ -165,4 +165,4 @@ schematics/*
 
 # Omit token for scraping
 auth.json
-./credentials.yml
+.credentials.yml
