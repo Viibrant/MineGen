@@ -6,6 +6,8 @@ import requests
 import pandas as pd
 import re
 import yaml
+import gzip
+import io
 
 
 def get_metadata(url=None, soup=None):
@@ -57,7 +59,9 @@ def get_metadata(url=None, soup=None):
 def download_schematic(url, metadata=None):
     ID = re.search(r"schematic/(\d+)", url).group(1)
     r = requests.get(
-        f"{url}download/action/", cookies=COOKIES, params={"type": "schematic"}
+        f"{url}download/action/",
+        cookies=COOKIES,
+        params={"type": "schematic"},
     )
 
     if metadata is None:
@@ -66,13 +70,13 @@ def download_schematic(url, metadata=None):
     # Create folder if it doesn't exist
     path = Path("schematics", metadata["Category"])
     path.mkdir(parents=True, exist_ok=True)
-
     file_path = path / f"{ID}.schematic"
 
     if file_path.exists():
         return
 
-    sf = SchematicFile().from_fileobj(r.raw)
+    r_proc = gzip.open(io.BytesIO(r.content))
+    sf = SchematicFile().from_fileobj(r_proc)
     sf.save(file_path, gzipped=True)
 
 
@@ -104,8 +108,10 @@ def generate_dataset(criteria="most-downloaded", num_pages=5, interval=None):
             interval[0], interval[1] + 1, leave=False, unit="page", desc="Page"
         )
 
+    s_count = 0
+
     for page in bar_page:
-        bar_page.set_description(f"Page {page}")
+        bar_page.set_description(f"Page {page}, {s_count}/{num_pages} schematics")
         url = f"{root}/{page}/"
         r = requests.get(url, cookies=COOKIES)
         soup = BeautifulSoup(r.text, "html.parser")
@@ -138,6 +144,7 @@ def generate_dataset(criteria="most-downloaded", num_pages=5, interval=None):
                 download_schematic(link, metadata=metadata)
                 list_metadata.append(metadata)
                 pbar.set_description(metadata["Name"] + " " + "\u2713")
+                s_count += 1
 
     df = pd.DataFrame(list_metadata)
     df.to_csv(f"schematics/{criteria}.csv", index=False)
@@ -166,4 +173,4 @@ if __name__ == "__main__":
     s = requests.Session()
     s.post(auth_url, data=cred)
     COOKIES = s.cookies.get_dict()
-    generate_dataset(interval=(60, 250))
+    generate_dataset(num_pages=1)
