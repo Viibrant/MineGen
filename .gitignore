@@ -161,8 +161,10 @@ cython_debug/
 
 # Schematic files
 .schematic
-schematics/*
+schematics
 
 # Omit token for scraping
 auth.json
 .credentials.yml
+
+.vscode
