@@ -1,53 +1,21 @@
 import gzip
 import os
+import requests
+import pandas as pd
+import numpy as np
+import yaml
 from pathlib import Path
 from io import BytesIO
 from typing import Dict, Optional
 from bs4 import BeautifulSoup
 from tqdm import tqdm, trange
 from nbtschematic import SchematicFile
-import requests
-import pandas as pd
-import numpy as np
-import yaml
-
-NUM_PAGES = 400
-SCHEMATICS_DIR = "schematics"
-ERRORS_FILE = "schematics/errors.txt"
-AUTH_URL = "https://www.minecraft-schematics.com/login/action/"
+from . import Metadata
 
 
-def get_metadata(url=None, soup=None):
-    """
-    Scrapes the metadata from a schematic page.
-
-    Returns
-    metadata : dict
-        A dictionary containing the metadata.
-    """
-    if not url and not soup:
-        raise ValueError("Must provide either url or soup.")
-    if url:
-        soup = BeautifulSoup(requests.get(url).text, "html.parser")
-    if not soup:
-        raise ValueError("Must provide either url or soup.")
-
-    title = soup.h1.text
-    table = soup.table
-
-    raw = [p.strip() for p in table.text.split("\n") if p]
-    keys = raw[0::2]
-    values = raw[1::2]
-
-    metadata = dict(zip(keys, values))
-    metadata["ID"] = int(soup.title.text.split("#")[-1])
-    metadata["Name"] = title
-    metadata["Rating"] = float(metadata["Rating"].split(" ")[1])
-    metadata["Download(s)"] = int(metadata["Download(s)"].split(" ")[-2])
-    return metadata
-
-
-def download_schematic(url: str, metadata: Optional[Dict] = None) -> None:
+def download_schematic(
+    url: str, COOKIES=None, SCHEMATICS_DIR="schematics", metadata: Optional[Dict] = None
+) -> None:
     # Get ID from URL
     ID = url.split("/")[-1]
 
@@ -60,7 +28,7 @@ def download_schematic(url: str, metadata: Optional[Dict] = None) -> None:
 
     # Get metadata if not provided
     if metadata is None:
-        metadata = get_metadata(url)
+        metadata = Metadata.get_metadata(url)
 
     # Create folder if it doesn't exist
     category_dir = os.path.join(SCHEMATICS_DIR, metadata["Category"])
@@ -80,34 +48,52 @@ def download_schematic(url: str, metadata: Optional[Dict] = None) -> None:
     schem_gen = gzip.open(BytesIO(r.content)) if gzipped else BytesIO(r.content)
 
     # Write to file
-    try:
-        sf = SchematicFile.from_fileobj(schem_gen)
-        # Integrity checks
-        assert np.array(sf.shape) > (1, 1, 1)
-        assert sf.blocks
-        assert "BlockData" in sf.root.keys()
-        sf.save(file_path)
-    except Exception as e:
-        # Write error to log file
-        with open(ERRORS_FILE, "a") as f:
-            f.write(f"{ID}, {metadata['Name']}, {metadata['Category']}, {e}\n")
+    sf = SchematicFile.from_fileobj(schem_gen)
+
+    # Integrity checks
+    assert np.array(sf.shape) > (1, 1, 1)
+    assert sf.blocks
+    assert "BlockData" in sf.root.keys()
+    sf.save(file_path)
 
 
-def generate_dataset(criteria="most-downloaded", num_pages=5, interval=None):
+def generate_dataset(
+    criteria="most-downloaded",
+    num_pages=5,
+    interval=None,
+    SCHEMATICS_DIR="schematics",
+    ERRORS_FILE="schematics/errors.txt",
+    CRED_FILE=".credentials.yml",
+    AUTH_URL="https://www.minecraft-schematics.com/login/action/",
+):
     """
-    Generates a dataset of schematics from the Minecraft Schematics website.
+    Generates a dataset of schematics from minecraft-schematics.com.
 
     Parameters
     ----------
     criteria : str, optional
-        The criteria to sort the schematics by. Must be one of "latest", "top-rated", "most-downloaded".
-        Defaults to "most-downloaded".
+        The criteria to use for sorting the schematics. Must be one of
+        ["latest", "top-rated", "most-downloaded"], by default "most-downloaded"
     num_pages : int, optional
-        The number of pages to scrape. Defaults to 5.
-    interval : iterable of shape (2,), optional
-        The interval of pages to scrape. Defaults to None.
-        Note: non-inclusive of upper and lower bound
+        The number of pages to scrape, by default 5
+    interval : tuple, optional
+        The interval of pages to scrape, by default None
+    SCHEMATICS_DIR : str, optional
+        The directory to save the schematics to, by default "schematics"
+    ERRORS_FILE : str, optional
+        The file to save errors to, by default "schematics/errors.txt"
+    CRED_FILE : str, optional
+        The file to load credentials from, by default ".credentials.yml"
+    AUTH_URL : str, optional
+        The URL to authenticate with, by default "https://www.minecraft-schematics.com/login/action/"
     """
+
+    with open(CRED_FILE, "r") as credfile:
+        cred = yaml.safe_load(credfile)
+
+    s = requests.Session()
+    s.post(AUTH_URL, data=cred)
+    COOKIES = s.cookies.get_dict()
 
     # Check for interval
     a, b = 0, num_pages + 1
@@ -165,23 +151,22 @@ def generate_dataset(criteria="most-downloaded", num_pages=5, interval=None):
                 continue
 
             if metadata["File Format"] == ".schematic":
-                download_schematic(link, metadata=metadata)
+                try:
+                    download_schematic(link, metadata=metadata)
+                except Exception as e:
+                    pbar.set_description(f"{pbar.desc:28.28}" + "\u274c")
+                    with open(ERRORS_FILE, "a") as f:
+                        f.write(
+                            f"{metadata['ID']}, {metadata['Name']}, {metadata['Category']}, {e}\n"
+                        )
+                    continue
+
                 list_metadata.append(metadata)
 
-                if path.exists():
-                    pbar.set_description(f"{metadata['Name']:30.30}" + " " + "\u2713")
-                    bar_page.set_description(
-                        f"{int(bar_page.desc.split(' downloaded')[0])+1} downloaded / {(page+1)*18} schematics"
-                    )
+                pbar.set_description(f"{metadata['Name']:30.30}" + " " + "\u2713")
+                bar_page.set_description(
+                    f"{int(bar_page.desc.split(' downloaded')[0])+1} downloaded / {(page+1)*18} schematics"
+                )
 
     df = pd.DataFrame(list_metadata)
     df.to_csv(f"schematics/{criteria}.csv", index=False)
-
-
-if __name__ == "__main__":
-    with open(".credentials.yml", "r") as credfile:
-        cred = yaml.safe_load(credfile)
-    s = requests.Session()
-    s.post(AUTH_URL, data=cred)
-    COOKIES = s.cookies.get_dict()
-    generate_dataset(num_pages=NUM_PAGES)
