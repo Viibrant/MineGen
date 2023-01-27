@@ -1,13 +1,20 @@
+import gzip
+import os
 from pathlib import Path
+from io import BytesIO
+from typing import Dict, Optional
 from bs4 import BeautifulSoup
 from tqdm import tqdm, trange
 from nbtschematic import SchematicFile
 import requests
 import pandas as pd
-import re
+import numpy as np
 import yaml
-import gzip
-import io
+
+NUM_PAGES = 400
+SCHEMATICS_DIR = "schematics"
+ERRORS_FILE = "schematics/errors.txt"
+AUTH_URL = "https://www.minecraft-schematics.com/login/action/"
 
 
 def get_metadata(url=None, soup=None):
@@ -18,66 +25,72 @@ def get_metadata(url=None, soup=None):
     metadata : dict
         A dictionary containing the metadata.
     """
+    if not url and not soup:
+        raise ValueError("Must provide either url or soup.")
+    if url:
+        soup = BeautifulSoup(requests.get(url).text, "html.parser")
+    if not soup:
+        raise ValueError("Must provide either url or soup.")
 
-    if soup is None:
-        r = requests.get(url, cookies=COOKIES)
-        soup = BeautifulSoup(r.text, "html.parser")
+    title = soup.h1.text
+    table = soup.table
 
-    # Extract the name from the page
-    title = soup.find_all("h1")[0].text
-
-    # Find table containing metadata
-    table = soup.find("table")
-
-    # Extract rows, splitting into columns
-    raw = [r.text for r in table.find_all("tr")]
-    raw = [r.split("\n") for r in raw]
-
-    # Remove empty strings
-    raw = [p.strip() for r in raw for p in r[1:-1]]
-
-    # Iniitalise dictionary, key-value pairs
-    keys = [p for i, p in enumerate(raw) if i % 2 == 0]
-    values = [p for p in raw if p not in keys]
+    raw = [p.strip() for p in table.text.split("\n") if p]
+    keys = raw[0::2]
+    values = raw[1::2]
 
     metadata = dict(zip(keys, values))
+    metadata["ID"] = int(soup.title.text.split("#")[-1])
     metadata["Name"] = title
-    metadata["ID"] = int(re.search(r"schematic/(\d+)", url).group(1))
-
-    # Data sanitisation
-    rating = re.search(r"\d+\.\d+", metadata["Rating"])
-    if rating is not None:
-        metadata["Rating"] = float(rating.group(0))
-
-    downloads = re.search(r"\d+", metadata["Download(s)"])
-    if downloads is not None:
-        metadata["Download(s)"] = int(downloads.group(0))
-
+    metadata["Rating"] = float(metadata["Rating"].split(" ")[1])
+    metadata["Download(s)"] = int(metadata["Download(s)"].split(" ")[-2])
     return metadata
 
 
-def download_schematic(url, metadata=None):
-    ID = re.search(r"schematic/(\d+)", url).group(1)
+def download_schematic(url: str, metadata: Optional[Dict] = None) -> None:
+    # Get ID from URL
+    ID = url.split("/")[-1]
+
+    # Request schematic file
     r = requests.get(
         f"{url}download/action/",
         cookies=COOKIES,
         params={"type": "schematic"},
     )
 
+    # Get metadata if not provided
     if metadata is None:
         metadata = get_metadata(url)
 
     # Create folder if it doesn't exist
-    path = Path("schematics", metadata["Category"])
-    path.mkdir(parents=True, exist_ok=True)
-    file_path = path / f"{ID}.schematic"
+    category_dir = os.path.join(SCHEMATICS_DIR, metadata["Category"])
+    os.makedirs(category_dir, exist_ok=True)
 
-    if file_path.exists():
+    # File path
+    file_path = os.path.join(category_dir, f"{ID}.schematic")
+
+    # Check if file already exists
+    if os.path.exists(file_path):
         return
 
-    r_proc = gzip.open(io.BytesIO(r.content))
-    sf = SchematicFile().from_fileobj(r_proc)
-    sf.save(file_path, gzipped=True)
+    # Check if file is gzipped
+    gzipped = BytesIO(r.content).read(3) == b"\x1f\x8b\x08"
+
+    # Open file
+    schem_gen = gzip.open(BytesIO(r.content)) if gzipped else BytesIO(r.content)
+
+    # Write to file
+    try:
+        sf = SchematicFile.from_fileobj(schem_gen)
+        # Integrity checks
+        assert np.array(sf.shape) > (1, 1, 1)
+        assert sf.blocks
+        assert "BlockData" in sf.root.keys()
+        sf.save(file_path)
+    except Exception as e:
+        # Write error to log file
+        with open(ERRORS_FILE, "a") as f:
+            f.write(f"{ID}, {metadata['Name']}, {metadata['Category']}, {e}\n")
 
 
 def generate_dataset(criteria="most-downloaded", num_pages=5, interval=None):
@@ -93,27 +106,36 @@ def generate_dataset(criteria="most-downloaded", num_pages=5, interval=None):
         The number of pages to scrape. Defaults to 5.
     interval : iterable of shape (2,), optional
         The interval of pages to scrape. Defaults to None.
+        Note: non-inclusive of upper and lower bound
     """
+
+    # Check for interval
+    a, b = 0, num_pages + 1
+    if interval is not None:
+        a, b = interval
+
+    # Check for valid criteria
+    valid_criteria = ["latest", "top-rated", "most-downloaded"]
+    if criteria not in valid_criteria:
+        raise ValueError(f"Criteria must be one of {valid_criteria}, got {criteria}.")
+
+    # Set up variables for tqdm, loop
+    kwargs_format = dict(
+        bar_format="{desc:30.30}{percentage:3.0f}%|{bar:100}{r_bar:50.50}",
+        leave=False,
+    )
+
+    TOTAL = num_pages * 18
     root = f"https://www.minecraft-schematics.com/{criteria}"
     list_metadata = []
-    bar_page = trange(1, num_pages + 1, leave=False, unit="page", desc="Page")
 
-    if criteria not in ["latest", "top-rated", "most-downloaded"]:
-        raise ValueError(
-            "Criteria must be one of 'latest', 'top-rated', 'most-downloaded'"
-        )
-    if interval is not None:
-        num_pages = interval[1] - interval[0] + 1
-        bar_page = trange(
-            interval[0], interval[1] + 1, leave=False, unit="page", desc="Page"
-        )
-
-    s_count = 0
+    bar_page = trange(
+        a, b, **kwargs_format, unit="page", desc=f"0 downloaded / {TOTAL} schematics"
+    )
 
     for page in bar_page:
-        bar_page.set_description(f"Page {page}, {s_count}/{num_pages} schematics")
-        url = f"{root}/{page}/"
-        r = requests.get(url, cookies=COOKIES)
+        # Get page content
+        r = requests.get(f"{root}/{page}/", cookies=COOKIES)
         soup = BeautifulSoup(r.text, "html.parser")
 
         # Get schematic links from download buttons
@@ -121,56 +143,45 @@ def generate_dataset(criteria="most-downloaded", num_pages=5, interval=None):
         links = [button.get("href") for button in download_buttons]
         links = [f"https://www.minecraft-schematics.com{link}" for link in links]
 
-        pbar = tqdm(links, unit="schem", leave=False)
+        pbar = tqdm(links, **kwargs_format, unit="schem")
+
+        # Iterate over all links for downloadable on page
         for link in pbar:
 
+            # Grab metadata
             metadata = get_metadata(link)
-            pbar.set_description(metadata["Name"])
+            pbar.set_description(f"{metadata['Name']:30.30}")
 
             path = Path(
                 "schematics", metadata["Category"], f"{metadata['ID']}.schematic"
             )
 
             if path.exists():
-                pbar.set_description("Already exists (skipped)")
+                pbar.set_description(f"{'Already exists (skipped)':30.30}")
                 continue
 
             if "File Format" not in metadata:
-                desc = "".join(["\u0336{}".format(c) for c in pbar.desc])
-                pbar.set_description(desc)
+                pbar.set_description(f"{pbar.desc:28.28}" + "\u274c")
                 continue
 
             if metadata["File Format"] == ".schematic":
                 download_schematic(link, metadata=metadata)
                 list_metadata.append(metadata)
-                pbar.set_description(metadata["Name"] + " " + "\u2713")
-                s_count += 1
+
+                if path.exists():
+                    pbar.set_description(f"{metadata['Name']:30.30}" + " " + "\u2713")
+                    bar_page.set_description(
+                        f"{int(bar_page.desc.split(' downloaded')[0])+1} downloaded / {(page+1)*18} schematics"
+                    )
 
     df = pd.DataFrame(list_metadata)
     df.to_csv(f"schematics/{criteria}.csv", index=False)
 
 
-NUM_PAGES = 2
-# use headers from cookies
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Accept-Language": "en-US,en;q=0.5",
-    "Accept-Encoding": "gzip, deflate, br",
-    "Referer": "https://www.minecraft-schematics.com/",
-    "Connection": "keep-alive",
-    "Upgrade-Insecure-Requests": "1",
-    "Pragma": "no-cache",
-    "Cache-Control": "no-cache",
-}
-
-auth_url = "https://www.minecraft-schematics.com/login/action/"
-
-
 if __name__ == "__main__":
-    with open(".credentials.yml", "r") as f:
-        cred = yaml.safe_load(f)
+    with open(".credentials.yml", "r") as credfile:
+        cred = yaml.safe_load(credfile)
     s = requests.Session()
-    s.post(auth_url, data=cred)
+    s.post(AUTH_URL, data=cred)
     COOKIES = s.cookies.get_dict()
-    generate_dataset(num_pages=1)
+    generate_dataset(num_pages=NUM_PAGES)
