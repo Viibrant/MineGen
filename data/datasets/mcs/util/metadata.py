@@ -1,5 +1,6 @@
 import os
 import requests
+import pandas as pd
 from csv import DictWriter, DictReader
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from bs4 import BeautifulSoup
@@ -57,6 +58,10 @@ class Metadata:
         ]
 
         self._scrape_metadata()
+        self.df = pd.read_csv(self.metadata_file)
+
+    def __getitem__(self, idx):
+        return self.df.iloc[idx]
 
     def _get_schematic_ids(self):
         """Gets all schematic IDs from schematics directory"""
