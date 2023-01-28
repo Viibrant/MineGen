@@ -3,10 +3,8 @@ from .datasets.mcs import SchematicDataset
 from .transforms import build_transforms
 
 
-def build_dataset(transforms, is_train=True):
-    dataset = SchematicDataset(
-        root="./", train=is_train, transform=transforms, download=True
-    )
+def build_dataset(transform, is_train=True):
+    dataset = SchematicDataset(transform=transform)
     return dataset
 
 
