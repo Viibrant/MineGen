@@ -1,12 +1,13 @@
-from torch.utils import data
-
-from .datasets.mnist import MNIST
+from torch.utils.data import DataLoader
+from .datasets.mcs import SchematicDataset
 from .transforms import build_transforms
 
 
 def build_dataset(transforms, is_train=True):
-    datasets = MNIST(root="./", train=is_train, transform=transforms, download=True)
-    return datasets
+    dataset = SchematicDataset(
+        root="./", train=is_train, transform=transforms, download=True
+    )
+    return dataset
 
 
 def make_data_loader(cfg, is_train=True):
@@ -18,11 +19,11 @@ def make_data_loader(cfg, is_train=True):
         shuffle = False
 
     transforms = build_transforms(cfg, is_train)
-    datasets = build_dataset(transforms, is_train)
+    dataset = build_dataset(transforms, is_train)
 
     num_workers = cfg.DATALOADER.NUM_WORKERS
-    data_loader = data.DataLoader(
-        datasets, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers
+    data_loader = DataLoader(
+        dataset, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers
     )
 
     return data_loader

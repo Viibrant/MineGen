@@ -1,23 +1,32 @@
 import gzip
 import os
-import requests
-import pandas as pd
-import numpy as np
-import yaml
-from pathlib import Path
+import traceback
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from csv import DictWriter
 from io import BytesIO
+from pathlib import Path
 from typing import Dict, Optional
+
+import numpy as np
+import pandas as pd
+import requests
+import yaml
 from bs4 import BeautifulSoup
-from tqdm import tqdm, trange
 from nbtschematic import SchematicFile
-from . import Metadata
+from tqdm import tqdm, trange
+
+from .metadata import Metadata
 
 
 def download_schematic(
     url: str, COOKIES=None, SCHEMATICS_DIR="schematics", metadata: Optional[Dict] = None
-) -> None:
+) -> Optional[Dict]:
     # Get ID from URL
-    ID = url.split("/")[-1]
+    ID = url.split("/")[-2]
+    # check if ID in any filenames
+    p = Path(SCHEMATICS_DIR).glob("**/*.schematic")
+    if any([ID in str(x) for x in p]):
+        return
 
     # Request schematic file
     r = requests.get(
@@ -51,15 +60,28 @@ def download_schematic(
     sf = SchematicFile.from_fileobj(schem_gen)
 
     # Integrity checks
-    assert np.array(sf.shape) > (1, 1, 1)
-    assert sf.blocks
-    assert "BlockData" in sf.root.keys()
+    assert sf.shape > (1, 1, 1)
+    assert sf.blocks is not None
+    assert "Blocks" in sf.root.keys()
     sf.save(file_path)
+
+    return metadata
+
+
+def find_urls(URL):
+    r = requests.get(URL)
+    soup = BeautifulSoup(r.text, "html.parser")
+    urls = soup.find_all("a", class_="btn btn-primary")
+    urls = [url.get("href") for url in urls]
+    urls = [url for url in urls if "/schematic/" in url]
+    urls = [f"https://www.minecraft-schematics.com{url}" for url in urls]
+    return urls
 
 
 def generate_dataset(
     criteria="most-downloaded",
     num_pages=5,
+    max_workers=256,
     interval=None,
     SCHEMATICS_DIR="schematics",
     ERRORS_FILE="schematics/errors.txt",
@@ -87,7 +109,30 @@ def generate_dataset(
     AUTH_URL : str, optional
         The URL to authenticate with, by default "https://www.minecraft-schematics.com/login/action/"
     """
+    # Initialise metadata file
+    metadata_path = os.path.join(SCHEMATICS_DIR, "metadata.csv")
 
+    # Create folder if it doesn't exist
+    os.makedirs(SCHEMATICS_DIR, exist_ok=True)
+
+    fields = [
+        "Rating",
+        "Category",
+        "Theme",
+        "Size",
+        "File Format",
+        "Submitted by",
+        "Posted on",
+        "Download(s)",
+        "ID",
+        "Name",
+        "Path",
+    ]
+    writer = DictWriter(open(metadata_path, "a"), fieldnames=fields)
+    if os.path.getsize(metadata_path) == 0 or not os.path.exists(metadata_path):
+        writer.writeheader()
+
+    # Load credentials and authenticate
     with open(CRED_FILE, "r") as credfile:
         cred = yaml.safe_load(credfile)
 
@@ -111,62 +156,53 @@ def generate_dataset(
         leave=False,
     )
 
-    TOTAL = num_pages * 18
-    root = f"https://www.minecraft-schematics.com/{criteria}"
     list_metadata = []
+    list_pages = [
+        f"https://www.minecraft-schematics.com/{criteria}/{p+1}/" for p in range(a, b)
+    ]
 
-    bar_page = trange(
-        a, b, **kwargs_format, unit="page", desc=f"0 downloaded / {TOTAL} schematics"
-    )
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        with tqdm(
+            total=len(list_pages), **kwargs_format, unit="page", desc="Finding URLs"
+        ) as pbar:
+            futures = []
+            for page in list_pages:
+                future = executor.submit(find_urls, page)
+                future.add_done_callback(lambda p: pbar.update(1))
+                futures.append(future)
 
-    for page in bar_page:
-        # Get page content
-        r = requests.get(f"{root}/{page}/", cookies=COOKIES)
-        soup = BeautifulSoup(r.text, "html.parser")
+            url_potential = []
+            for future in futures:
+                url_potential.extend(future.result())
 
-        # Get schematic links from download buttons
-        download_buttons = soup.find_all("a", class_="btn btn-primary")
-        links = [button.get("href") for button in download_buttons]
-        links = [f"https://www.minecraft-schematics.com{link}" for link in links]
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        with tqdm(
+            total=len(url_potential),
+            **kwargs_format,
+            unit="schematic",
+            desc="Downloading",
+        ) as pbar:
+            futures = []
 
-        pbar = tqdm(links, **kwargs_format, unit="schem")
+            for url in url_potential:
+                future = executor.submit(
+                    download_schematic, url, COOKIES, SCHEMATICS_DIR
+                )
+                future.add_done_callback(lambda p: pbar.update(1))
+                futures.append(future)
 
-        # Iterate over all links for downloadable on page
-        for link in pbar:
-
-            # Grab metadata
-            metadata = get_metadata(link)
-            pbar.set_description(f"{metadata['Name']:30.30}")
-
-            path = Path(
-                "schematics", metadata["Category"], f"{metadata['ID']}.schematic"
-            )
-
-            if path.exists():
-                pbar.set_description(f"{'Already exists (skipped)':30.30}")
-                continue
-
-            if "File Format" not in metadata:
-                pbar.set_description(f"{pbar.desc:28.28}" + "\u274c")
-                continue
-
-            if metadata["File Format"] == ".schematic":
+            for future in futures:
                 try:
-                    download_schematic(link, metadata=metadata)
-                except Exception as e:
-                    pbar.set_description(f"{pbar.desc:28.28}" + "\u274c")
-                    with open(ERRORS_FILE, "a") as f:
-                        f.write(
-                            f"{metadata['ID']}, {metadata['Name']}, {metadata['Category']}, {e}\n"
+                    metadata = future.result()
+                    if isinstance(metadata, dict):
+                        metadata["Path"] = os.path.join(
+                            SCHEMATICS_DIR,
+                            metadata["Category"],
+                            f"{metadata['ID']}.schematic",
                         )
+                        writer.writerow(metadata)
+                except Exception as e:
+                    traceback.print_exc(file=open(ERRORS_FILE, "a"), limit=1)
                     continue
 
-                list_metadata.append(metadata)
-
-                pbar.set_description(f"{metadata['Name']:30.30}" + " " + "\u2713")
-                bar_page.set_description(
-                    f"{int(bar_page.desc.split(' downloaded')[0])+1} downloaded / {(page+1)*18} schematics"
-                )
-
-    df = pd.DataFrame(list_metadata)
-    df.to_csv(f"schematics/{criteria}.csv", index=False)
+    return list_metadata
