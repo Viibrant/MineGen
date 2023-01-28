@@ -1,8 +1,10 @@
 import os
-import requests
-import pandas as pd
-from csv import DictWriter, DictReader
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from csv import DictReader, DictWriter
+from pathlib import Path
+
+import pandas as pd
+import requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 
@@ -39,10 +41,12 @@ class Metadata:
         return metadata
 
     def __init__(
-        self, schematics_dir: str = "schematics", metadata_file: str = "metadata.csv"
+        self,
+        schematics_dir: str = "schematics",
+        metadata_file: str = "metadata.csv",
     ):
         self.schematics_dir = schematics_dir
-        self.metadata_file = metadata_file
+        self.metadata_file = os.path.join(schematics_dir, metadata_file)
         self.metadata = {}
         self.fields = [
             "Rating",
@@ -55,16 +59,30 @@ class Metadata:
             "Download(s)",
             "ID",
             "Name",
+            "Path",
         ]
 
-        self._scrape_metadata()
-        self.df = pd.read_csv(self.metadata_file)
+        if os.path.exists(self.metadata_file) and os.path.getsize(self.metadata_file):
+            self.df = pd.read_csv(self.metadata_file)
 
     def __getitem__(self, idx):
         return self.df.iloc[idx]
 
+    def __len__(self):
+        return len(self.df)
+
+    def write_metadata(self, max_workers=256):
+        """Append metadata to CSV file"""
+        if self._get_schematic_ids() == []:
+            print("No schematics found.")
+            return
+        self._scrape_metadata(max_workers=max_workers)
+
     def _get_schematic_ids(self):
         """Gets all schematic IDs from schematics directory"""
+
+        Path(self.schematics_dir).mkdir(parents=True, exist_ok=True)
+
         schematic_ids = []
         for category_dir in os.listdir(self.schematics_dir):
             category_path = os.path.join(self.schematics_dir, category_dir)
@@ -83,7 +101,7 @@ class Metadata:
                 existing_ids.append(row["ID"])
         return existing_ids
 
-    def _scrape_metadata(self, num_workers=256):
+    def _scrape_metadata(self, max_workers=256):
         """Scrapes metadata for all IDs not found in metadata file"""
 
         f = DictWriter(open(self.metadata_file, "w"), fieldnames=self.fields)
@@ -100,7 +118,7 @@ class Metadata:
 
         # Scrape metadata for new IDs
         new_ids = list(set(schematic_ids) - set(existing_ids))
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
             future_to_id = {
                 executor.submit(
                     self.get_metadata,
@@ -111,6 +129,11 @@ class Metadata:
             for future in tqdm(as_completed(future_to_id), total=len(new_ids)):
                 try:
                     metadata = future.result()
+                    metadata["Path"] = os.path.join(
+                        self.schematics_dir,
+                        metadata["Category"],
+                        f"{metadata['ID']}.schematic",
+                    )
                     f.writerow(metadata)
                 except Exception as exc:
-                    print(f"{future_to_id[future]}  generated an exception: {exc}")
+                    pass
