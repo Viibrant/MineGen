@@ -13,7 +13,7 @@ class Metadata:
     """A class for generating a CSV file containing metadata for all schematics in a directory."""
 
     @staticmethod
-    def get_metadata(url=None, soup=None):
+    def get_metadata(url=None, soup=None, schematics_dir="schematics"):
         """
         Scrapes the metadata from a schematic page.
 
@@ -38,6 +38,11 @@ class Metadata:
         metadata["Name"] = title
         metadata["Rating"] = float(metadata["Rating"].split(" ")[1])
         metadata["Download(s)"] = int(metadata["Download(s)"].split(" ")[-2])
+        metadata["Path"] = os.path.join(
+            schematics_dir,
+            metadata["Category"],
+            f"{metadata['ID']}.schematic",
+        )
         return metadata
 
     def __init__(
