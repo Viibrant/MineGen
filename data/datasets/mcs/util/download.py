@@ -63,6 +63,11 @@ def download_schematic(
     assert sf.shape > (1, 1, 1)
     assert sf.blocks is not None
     assert "Blocks" in sf.root.keys()
+
+    # Write shape
+    metadata["Shape"] = sf.shape
+
+    # Save schematic
     sf.save(file_path)
 
     return metadata
@@ -127,6 +132,7 @@ def generate_dataset(
         "ID",
         "Name",
         "Path",
+        "Shape",
     ]
     writer = DictWriter(open(metadata_path, "a"), fieldnames=fields)
     if os.path.getsize(metadata_path) == 0 or not os.path.exists(metadata_path):
