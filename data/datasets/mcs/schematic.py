@@ -1,9 +1,8 @@
-import numpy as np
 from nbtschematic import SchematicFile
 from torch.utils.data import DataLoader, Dataset
-
-from .util.download import generate_dataset
-from .util.metadata import Metadata
+from .util import main
+import pandas as pd
+import numpy as np
 
 
 class SchematicDataset(Dataset):
@@ -19,19 +18,15 @@ class SchematicDataset(Dataset):
         self.transform = transform
 
         if download:
-            generate_dataset(**kwargs)
-        # load your data here, for example:
-        # self.schematics = load_schematics_from_folder(data_dir)
-        self.metadata = Metadata(
-            self.data_dir,
-            metadata_file=metadata_file,
-        )
+            main(**kwargs)
+
+        self.metadata = pd.read_csv(metadata_file)
 
     def __len__(self):
         return len(self.metadata)
 
     def __getitem__(self, idx):
-        metadata = self.metadata[idx]
+        metadata = self.metadata.iloc[idx]
         sf = SchematicFile.load(metadata["Path"])
 
         if self.transform:
