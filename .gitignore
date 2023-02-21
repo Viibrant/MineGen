@@ -168,3 +168,6 @@ auth.json
 .credentials.yml
 
 .vscode
+
+# omit metadata file
+data.csv

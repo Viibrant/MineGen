@@ -1,11 +1,20 @@
-from concurrent.futures import ProcessPoolExecutor
+"""
+File that scrapes the minecraft-schematics.com website for schematics and
+metadata. This scraper is multithreaded and asynchronous.
+TODO! Check if the schematic is already downloaded before downloading it
+TODO! Add logging
+TODO! Add error handling
+TODO! Refactor and simplify code
+"""
+
+
 from nbtschematic import SchematicFile
 from typing import Optional
 from io import BytesIO
 import asyncio
+import aiofiles
 import gzip
 import os
-import time
 from bs4 import BeautifulSoup
 from httpx import AsyncClient
 import pandas as pd
@@ -64,7 +73,7 @@ class CriteriaPage:
     def __repr__(self):
         return f"CriteriaPage(criteria={self.criteria}, page={self.page})"
 
-    async def get_urls(self, session, tries=3):
+    async def get_candidates(self, session, tries=3):
         """Get the URLs of the schematics on the page
 
         Parameters
@@ -82,16 +91,14 @@ class CriteriaPage:
         while tries > 0:
             try:
                 response = await session.get(self.root, timeout=10)
-                break
             except Exception as e:
-                print(e)
                 tries -= 1
                 if tries == 0:
                     return None
-
-        self.soup = BeautifulSoup(response.text, "html.parser")
-        self.urls = self._url_parse()
-        return self.urls
+            else:
+                self.soup = BeautifulSoup(response.text, "html.parser")
+                self.urls = self._url_parse()
+                return self.urls
 
     def _url_parse(self) -> list[str]:
         """Parse the URLs of the schematics on the page
@@ -107,7 +114,7 @@ class CriteriaPage:
         urls = [f"https://www.minecraft-schematics.com{url}" for url in urls]
         return urls
 
-    async def get_metadata(self, url, session):
+    async def get_metadata(self, session, url, sem, tries=3):
         """Get the metadata of a schematic
 
         Parameters
@@ -122,17 +129,19 @@ class CriteriaPage:
         dict
             The metadata of the schematic
         """
-
-        try:
-            response = await session.get(url)
-            soup = BeautifulSoup(response.text, "html.parser")
-            metadata = self.__metadata_parse(url, soup)
-            return metadata
-
-        except Exception as e:
-            with open(ERROR_FILE, "a") as f:
-                f.write(f"{url}: {e}")
-            return None
+        while tries > 0:
+            try:
+                async with sem:
+                    async with asyncio.timeout(20):
+                        response = await session.get(url)
+            except Exception as e:
+                tries -= 1
+                if tries == 0:
+                    return
+            else:
+                soup = BeautifulSoup(response.text, "html.parser")
+                metadata = self.__metadata_parse(url, soup)
+                return metadata
 
     def __metadata_parse(self, url: str, soup: BeautifulSoup):
         """Parse the metadata of a schematic
@@ -182,7 +191,8 @@ class CriteriaPage:
         metadata["Page"] = self.page
         return metadata
 
-    async def download(self, metadata, session, path: Optional[str] = None):
+    @staticmethod
+    async def download(metadata, session, sem, path: Optional[str] = None, skip=True):
         """Download a schematic
 
         Parameters
@@ -200,72 +210,42 @@ class CriteriaPage:
             The URL of the schematic and whether the download was successful
         """
 
+        if skip and os.path.exists(metadata.get("Path")):
+            return metadata
+
         try:
-            url = metadata.get("URL")
-            path = metadata.get("Path") if path is None else path
+            async with sem:
+                url = metadata.get("URL")
+                path = metadata.get("Path") if path is None else path
 
-            response = await session.get(url + "download/action/")
-            content = response.content
+                # Get download link
+                async with asyncio.timeout(20):
+                    response = await session.get(
+                        url + "download/action/",
+                        params={"type": "schematic"},
+                        timeout=10,
+                    )
+                    try:
+                        sf = SchematicFile.from_fileobj(BytesIO(response.content))
+                    except KeyError:
+                        # file is gzipped
+                        sf = SchematicFile.from_fileobj(
+                            gzip.open(BytesIO(response.content))
+                        )
+                    assert sf.shape != (1, 1, 1), "Schematic is empty"
+                    assert np.asarray(sf.blocks) is not None, "Blocks is empty"
+                    assert "Blocks" in sf.root.keys(), "Blocks not in root"
+                    assert path is not None, "Path is None"
 
-            # Open content as file-like object
-            gzipped = BytesIO(content).read(3) == b"\x1f\x8b\x08"
-            schem_gen = gzip.open(BytesIO(content)) if gzipped else BytesIO(content)
+                    # Write schematic
+                    async with aiofiles.open(path, "wb") as f:
+                        await f.write(response.content)
 
-            # Read schematic
-            sf = SchematicFile.from_fileobj(schem_gen)
+                    metadata["Shape"] = [int(i) for i in sf.shape]
+                    return metadata
 
-            # Integrity checks
-            assert sf.shape != (1, 1, 1)
-            assert np.asarray(sf.blocks) is not None
-            assert "Blocks" in sf.root.keys()
-            assert path is not None
-
-            # Write schematic
-            sf.save(path)
-            return url, True
         except Exception as e:
-            return metadata.get("URL"), False
-
-    async def execute(self):
-        """Execute the page
-
-        Returns
-        -------
-        CriteriaPage
-            The page with the schematics
-        """
-
-        async with AsyncClient(timeout=20) as session:
-            # Authenticate session
-            creds = yaml.safe_load(open(CRED_FILE, "r"))
-            await session.post(AUTH_URL, data=creds)
-            await self.get_urls(session)
-
-            # Download schematics in parallel using asyncio
-            if self.urls is not None:
-                tasks = [self.get_metadata(url, session) for url in self.urls]
-                self.schematics = []
-
-                # For each task, add the metadata to the list of schematics
-                for f in tqdm.as_completed(tasks):
-                    metadata = await f
-                    if metadata is None:
-                        continue
-                    self.schematics.append(metadata)
-
-                # Download the schematics
-                tasks = [
-                    self.download(metadata, session) for metadata in self.schematics
-                ]
-
-                # Log errors
-                for f in tqdm.as_completed(tasks):
-                    url, success = await f
-                    if not success:
-                        with open(ERROR_FILE, "a") as f:
-                            f.write(f"{url}: Failed to download")
-
-        return self
+            return (metadata.get("URL"), False)
 
 
 async def generate_dataset(
@@ -273,8 +253,8 @@ async def generate_dataset(
     num_pages=5,
     max_workers=10,
     interval=None,
-    SCHEMATICS_DIR="schematics",
-    ERRORS_FILE="schematics/errors.txt",
+    SCHEMATICS_DIR=SCHEMATICS_DIR,
+    ERRORS_FILE=ERROR_FILE,
     CRED_FILE=".credentials.yml",
     AUTH_URL="https://www.minecraft-schematics.com/login/action/",
 ):
@@ -299,35 +279,72 @@ async def generate_dataset(
     AUTH_URL : str, optional
         The URL to authenticate with, by default "https://www.minecraft-schematics.com/login/action/"
     """
-
     # Create folder if it doesn't exist
     os.makedirs(SCHEMATICS_DIR, exist_ok=True)
 
     # Check interval
-    a, b = 0, num_pages + 1
-    if interval is not None:
-        a, b = interval
+    a, b = (1, num_pages) if interval is None else interval
 
     # Check for valid criteria
     valid_criteria = ["latest", "top-rated", "most-downloaded"]
     if criteria not in valid_criteria:
         raise ValueError(f"Criteria must be one of {valid_criteria}, got {criteria}.")
 
-    # Create list of CriteriaPage objects
-    list_obj = [CriteriaPage(criteria, p + 1) for p in range(a, b)]
+    async with AsyncClient() as session:
+        sem = asyncio.Semaphore(max_workers)
+        creds = yaml.safe_load(open(CRED_FILE, "r"))
+        await session.post(AUTH_URL, data=creds)
 
-    # Execute all requests
-    scraped_pages = await asyncio.gather(
-        *[obj.execute() for obj in list_obj],
-    )
+        found_urls = []
 
-    # Get all metadata
-    scraped_metadata = []
-    for page in scraped_pages:
-        scraped_metadata.extend(page.schematics)
+        # Execute all requests
+        print("Getting candidates...")
+        list_obj = [CriteriaPage(criteria, p + 1) for p in range(a, b)]
+        tasks = [asyncio.create_task(page.get_candidates(session)) for page in list_obj]
+
+        # For each discovered URL, get metadata
+        for result in await tqdm.gather(*tasks):
+            found_urls.append(result)
+
+        # Flatten list
+        found_urls = [url for sublist in found_urls for url in sublist]
+
+        print("Getting metadata...")
+        # Get metadata
+        tasks = [
+            asyncio.create_task(
+                CriteriaPage(criteria, 0).get_metadata(session, url, sem)
+            )
+            for url in found_urls
+        ]
+
+        metadata_list = await tqdm.gather(*tasks)
+        metadata_list = [
+            metadata
+            for metadata in metadata_list
+            if metadata.get("File Format") == ".schematic"
+        ]
+
+        # Download schematics
+        print(f"Found {len(metadata_list)} suitable schematics.")
+        print("Downloading schematics...")
+        tasks = [
+            asyncio.create_task(CriteriaPage.download(metadata, session, sem))
+            for metadata in metadata_list
+        ]
+
+        metadata_list = await tqdm.gather(*tasks)
+        valid_list = []
+
+        for metadata in metadata_list:
+            if isinstance(metadata, tuple):
+                with open(ERRORS_FILE, "a") as f:
+                    f.write(f"{metadata[0]} {metadata[1]}")
+            elif metadata is not None:
+                valid_list.append(metadata)
 
     # Generate dataframe
-    df = pd.DataFrame(scraped_metadata)
+    df = pd.DataFrame(valid_list)
     return df
 
 
@@ -337,5 +354,5 @@ def main(**kwargs):
 
 
 if __name__ == "__main__":
-    df = asyncio.run(generate_dataset(interval=(0, 400)))
+    df = asyncio.run(generate_dataset(num_pages=100))
     df.to_csv("data.csv", index=False)
