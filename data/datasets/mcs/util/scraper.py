@@ -73,7 +73,7 @@ class CriteriaPage:
     def __repr__(self):
         return f"CriteriaPage(criteria={self.criteria}, page={self.page})"
 
-    async def get_candidates(self, session, tries=3):
+    async def get_candidates(self, session, tries=5):
         """Get the URLs of the schematics on the page
 
         Parameters
@@ -137,7 +137,7 @@ class CriteriaPage:
             except Exception as e:
                 tries -= 1
                 if tries == 0:
-                    return
+                    return dict()
             else:
                 soup = BeautifulSoup(response.text, "html.parser")
                 metadata = self.__metadata_parse(url, soup)
@@ -241,11 +241,13 @@ class CriteriaPage:
                     async with aiofiles.open(path, "wb") as f:
                         await f.write(response.content)
 
-                    metadata["Shape"] = [int(i) for i in sf.shape]
+                    metadata["Y"] = int(sf.shape[0])
+                    metadata["Z"] = int(sf.shape[1])
+                    metadata["X"] = int(sf.shape[2])
                     return metadata
 
         except Exception as e:
-            return (metadata.get("URL"), False)
+            return (metadata.get("URL"), e)
 
 
 async def generate_dataset(
@@ -306,8 +308,15 @@ async def generate_dataset(
         for result in await tqdm.gather(*tasks):
             found_urls.append(result)
 
-        # Flatten list
-        found_urls = [url for sublist in found_urls for url in sublist]
+        # Flatten list and drop None
+        found_urls = sum([x for x in found_urls if x is not None], [])
+
+        # Check if any schematics already exist
+        existing_schematics = os.listdir(SCHEMATICS_DIR)
+        existing_schematics = [int(x.split(".")[0]) for x in existing_schematics]
+        found_urls = [
+            x for x in found_urls if int(x.split("/")[-2]) not in existing_schematics
+        ]
 
         print("Getting metadata...")
         # Get metadata
@@ -338,7 +347,7 @@ async def generate_dataset(
 
         for metadata in metadata_list:
             if isinstance(metadata, tuple):
-                with open(ERRORS_FILE, "a") as f:
+                with open(ERRORS_FILE, "w") as f:
                     f.write(f"{metadata[0]} {metadata[1]}")
             elif metadata is not None:
                 valid_list.append(metadata)
@@ -354,5 +363,8 @@ def main(**kwargs):
 
 
 if __name__ == "__main__":
-    df = asyncio.run(generate_dataset(num_pages=100))
+    df = asyncio.run(generate_dataset(interval=(0, 500)))
+    # If previously saved, load and append
+    if os.path.exists("data.csv"):
+        df = pd.concat([df, pd.read_csv("data.csv")])
     df.to_csv("data.csv", index=False)
