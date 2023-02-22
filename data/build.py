@@ -3,8 +3,8 @@ from .datasets.mcs import SchematicDataset
 from .transforms import build_transforms
 
 
-def build_dataset(transform, is_train=True):
-    dataset = SchematicDataset(transform=transform)
+def build_dataset(transform, is_train=True, **kwargs):
+    dataset = SchematicDataset(transform=transform, threshold=128, **kwargs)
     return dataset
 
 
@@ -17,7 +17,7 @@ def make_data_loader(cfg, is_train=True):
         shuffle = False
 
     transforms = build_transforms(cfg, is_train)
-    dataset = build_dataset(transforms, is_train)
+    dataset = build_dataset(transforms, is_train, threshold=cfg.MODEL.THRESHOLD)
 
     num_workers = cfg.DATALOADER.NUM_WORKERS
     data_loader = DataLoader(
