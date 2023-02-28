@@ -1,4 +1,4 @@
-from mcs import SchematicDataset
+from schematics import SchematicDataset
 from mcs.util.download import generate_dataset
 
 CRITERIA = "most-downloaded"
