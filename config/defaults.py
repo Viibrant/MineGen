@@ -51,13 +51,17 @@ _C.DATASETS = CN()
 _C.DATASETS.TRAIN = ()
 # List of the dataset names for testing, as present in paths_catalog.py
 _C.DATASETS.TEST = ()
+# Threshold for size of schematic
+_C.DATASETS.THRESHOLD = 128
 
 # -----------------------------------------------------------------------------
 # DataLoader
 # -----------------------------------------------------------------------------
 _C.DATALOADER = CN()
+
 # Number of data loading threads
 _C.DATALOADER.NUM_WORKERS = 8
+
 
 # ---------------------------------------------------------------------------- #
 # Solver
