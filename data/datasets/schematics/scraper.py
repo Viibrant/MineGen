@@ -304,16 +304,22 @@ async def generate_dataset(
         list_obj = [CriteriaPage(criteria, p + 1) for p in range(a, b)]
         tasks = [asyncio.create_task(page.get_candidates(session)) for page in list_obj]
 
+        # Check if any schematics already exist
+        existing_schematics = os.listdir(SCHEMATICS_DIR)
+        existing_schematics = [int(x.split(".")[0]) for x in existing_schematics]
+        existing_schematics = [f"{BASE_URL}/schematic/{_id}" for _id in existing_schematics]
+
         # For each discovered URL, get metadata
+        # Skip all URLs that have already been scraped
+        # TODO: Validate local copy of metadata for those URLs.
         for result in await tqdm.gather(*tasks):
+            if result in existing_schematics:
+                continue
             found_urls.append(result)
 
         # Flatten list and drop None
         found_urls = sum([x for x in found_urls if x is not None], [])
 
-        # Check if any schematics already exist
-        existing_schematics = os.listdir(SCHEMATICS_DIR)
-        existing_schematics = [int(x.split(".")[0]) for x in existing_schematics]
         found_urls = [
             x for x in found_urls if int(x.split("/")[-2]) not in existing_schematics
         ]
