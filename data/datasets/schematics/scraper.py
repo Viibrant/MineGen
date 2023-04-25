@@ -8,20 +8,20 @@ TODO! Refactor and simplify code
 """
 
 
-from nbtschematic import SchematicFile
-from typing import Optional
-from io import BytesIO
 import asyncio
-import aiofiles
 import gzip
 import os
+from io import BytesIO
+from typing import Optional
+
+import aiofiles
+import numpy as np
+import pandas as pd
+import yaml
 from bs4 import BeautifulSoup
 from httpx import AsyncClient
-import pandas as pd
-import numpy as np
-import yaml
+from nbtschematic import SchematicFile
 from tqdm.asyncio import tqdm
-
 
 BASE_URL = "https://www.minecraft-schematics.com"
 AUTH_URL = BASE_URL + "/login/action/"
@@ -69,6 +69,7 @@ class CriteriaPage:
         self.criteria = criteria
         self.page = page
         self.urls = None
+        self.SCHEMATICS_DIR = f"{SCHEMATICS_DIR}/{criteria}"
 
     def __repr__(self):
         return f"CriteriaPage(criteria={self.criteria}, page={self.page})"
@@ -183,7 +184,7 @@ class CriteriaPage:
             metadata["Path"] = None
         else:
             metadata["Path"] = os.path.join(
-                SCHEMATICS_DIR,
+                self.SCHEMATICS_DIR,
                 str(metadata["ID"]) + file_format,
             )
 
@@ -306,8 +307,16 @@ async def generate_dataset(
 
         # Check if any schematics already exist
         existing_schematics = os.listdir(SCHEMATICS_DIR)
+        # Get files that are in form <int>.<format>
+        existing_schematics = [
+            x for x in existing_schematics if "." in x and x.split(".")[0].isdigit()
+        ]
+        # Get IDs of existing schematics
         existing_schematics = [int(x.split(".")[0]) for x in existing_schematics]
-        existing_schematics = [f"{BASE_URL}/schematic/{_id}" for _id in existing_schematics]
+        # Get URLs of existing schematics
+        existing_schematics = [
+            f"{BASE_URL}/schematic/{_id}" for _id in existing_schematics
+        ]
 
         # For each discovered URL, get metadata
         # Skip all URLs that have already been scraped
@@ -369,7 +378,7 @@ def main(**kwargs):
 
 
 if __name__ == "__main__":
-    df = asyncio.run(generate_dataset(interval=(0, 500)))
+    df = asyncio.run(generate_dataset(interval=(0, 800)))
     # If previously saved, load and append
     if os.path.exists("data.csv"):
         df = pd.concat([df, pd.read_csv("data.csv")])
