@@ -70,6 +70,7 @@ class CriteriaPage:
         self.page = page
         self.urls = None
         self.SCHEMATICS_DIR = f"{SCHEMATICS_DIR}/{criteria}"
+        os.makedirs(self.SCHEMATICS_DIR, exist_ok=True)
 
     def __repr__(self):
         return f"CriteriaPage(criteria={self.criteria}, page={self.page})"
@@ -343,6 +344,8 @@ async def generate_dataset(
         ]
 
         metadata_list = await tqdm.gather(*tasks)
+        print(len(metadata_list))
+        print(metadata_list[0])
         metadata_list = [
             metadata
             for metadata in metadata_list
@@ -362,24 +365,18 @@ async def generate_dataset(
 
         for metadata in metadata_list:
             if isinstance(metadata, tuple):
-                with open(ERRORS_FILE, "w") as f:
-                    f.write(f"{metadata[0]} {metadata[1]}")
+                with open(ERRORS_FILE, "a") as f:
+                    f.write(f"{metadata[0]}: {metadata[1]}")
             elif metadata is not None:
                 valid_list.append(metadata)
 
     # Generate dataframe
     df = pd.DataFrame(valid_list)
-    return df
-
-
-def main(**kwargs):
-    df = asyncio.run(generate_dataset(**kwargs))
+    if os.path.exists("data.csv"):
+        df = pd.concat([df, pd.read_csv("data.csv")])
+    df.to_csv("data.csv", index=False)
     return df
 
 
 if __name__ == "__main__":
-    df = asyncio.run(generate_dataset(interval=(0, 800)))
-    # If previously saved, load and append
-    if os.path.exists("data.csv"):
-        df = pd.concat([df, pd.read_csv("data.csv")])
-    df.to_csv("data.csv", index=False)
+    df = asyncio.run(generate_dataset(interval=(0, 835), criteria="latest"))
