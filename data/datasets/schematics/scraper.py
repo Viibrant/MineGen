@@ -15,6 +15,7 @@ from io import BytesIO
 from typing import Optional
 
 import aiofiles
+import aiohttp
 import numpy as np
 import pandas as pd
 import yaml
@@ -134,9 +135,9 @@ class CriteriaPage:
         while tries > 0:
             try:
                 async with sem:
-                    async with asyncio.timeout(20):
-                        response = await session.get(url)
+                    response = await session.get(url, timeout=20)
             except Exception as e:
+                print(e)
                 tries -= 1
                 if tries == 0:
                     return dict()
@@ -221,32 +222,31 @@ class CriteriaPage:
                 path = metadata.get("Path") if path is None else path
 
                 # Get download link
-                async with asyncio.timeout(20):
-                    response = await session.get(
-                        url + "download/action/",
-                        params={"type": "schematic"},
-                        timeout=10,
+                response = await session.get(
+                    url + "download/action/",
+                    params={"type": "schematic"},
+                    timeout=20,
+                )
+                try:
+                    sf = SchematicFile.from_fileobj(BytesIO(response.content))
+                except KeyError:
+                    # file is gzipped
+                    sf = SchematicFile.from_fileobj(
+                        gzip.open(BytesIO(response.content))
                     )
-                    try:
-                        sf = SchematicFile.from_fileobj(BytesIO(response.content))
-                    except KeyError:
-                        # file is gzipped
-                        sf = SchematicFile.from_fileobj(
-                            gzip.open(BytesIO(response.content))
-                        )
-                    assert sf.shape != (1, 1, 1), "Schematic is empty"
-                    assert np.asarray(sf.blocks) is not None, "Blocks is empty"
-                    assert "Blocks" in sf.root.keys(), "Blocks not in root"
-                    assert path is not None, "Path is None"
+                assert sf.shape != (1, 1, 1), "Schematic is empty"
+                assert np.asarray(sf.blocks) is not None, "Blocks is empty"
+                assert "Blocks" in sf.root.keys(), "Blocks not in root"
+                assert path is not None, "Path is None"
 
-                    # Write schematic
-                    async with aiofiles.open(path, "wb") as f:
-                        await f.write(response.content)
+                # Write schematic
+                async with aiofiles.open(path, "wb") as f:
+                    await f.write(response.content)
 
-                    metadata["Y"] = int(sf.shape[0])
-                    metadata["Z"] = int(sf.shape[1])
-                    metadata["X"] = int(sf.shape[2])
-                    return metadata
+                metadata["Y"] = int(sf.shape[0])
+                metadata["Z"] = int(sf.shape[1])
+                metadata["X"] = int(sf.shape[2])
+                return metadata
 
         except Exception as e:
             return (metadata.get("URL"), e)
@@ -377,6 +377,8 @@ async def generate_dataset(
     df.to_csv("data.csv", index=False)
     return df
 
+def main(**kwargs):
+    return asyncio.run(generate_dataset(**kwargs))
 
 if __name__ == "__main__":
     df = asyncio.run(generate_dataset(interval=(0, 835), criteria="latest"))
