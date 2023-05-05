@@ -381,4 +381,4 @@ def main(**kwargs):
     return asyncio.run(generate_dataset(**kwargs))
 
 if __name__ == "__main__":
-    df = asyncio.run(generate_dataset(interval=(0, 835), criteria="latest"))
+    df = asyncio.run(generate_dataset(interval=(0, 700), criteria="top-rated"))

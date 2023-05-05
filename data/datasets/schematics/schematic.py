@@ -4,7 +4,7 @@ from nbtschematic import SchematicFile
 from sklearn.preprocessing import OneHotEncoder
 from torch.utils.data import DataLoader, Dataset, random_split
 
-import pytorch_lightning as pl
+import lightning.pytorch as pl
 import torch
 import torch.nn.functional as F
 import pandas as pd
