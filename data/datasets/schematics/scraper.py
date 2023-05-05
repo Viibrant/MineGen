@@ -64,7 +64,7 @@ class CriteriaPage:
         Get the metadata of a schematic
     """
 
-    def __init__(self, criteria: str, page: int):
+    def __init__(self, criteria: str, page: int, SCHEMATICS_DIR: str = "schematics"):
         assert criteria in CRITERIA, f"criteria must be one of {CRITERIA}"
         self.root = f"https://www.minecraft-schematics.com/{criteria}/{page}/"
         self.criteria = criteria
