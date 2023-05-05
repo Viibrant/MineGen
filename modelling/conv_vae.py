@@ -4,8 +4,10 @@ Uses a 3D convolutional encoder, followed by a 1D linear layer, followed by a 3D
 """
 
 from torch import nn
+import torch
 import lightning.pytorch as pl
-
+from layers import ResidualBlock
+from einops.layers.torch import Rearrange
 
 class AutoEncoder(nn.Module):
     def _conv_layer(self, in_channels, out_channels, kernel_size, stride, padding):
