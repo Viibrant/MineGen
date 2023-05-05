@@ -171,3 +171,7 @@ auth.json
 
 # omit metadata file
 data.csv
+
+# no experiments allowed >:(
+runs/
+lightning_logs/
