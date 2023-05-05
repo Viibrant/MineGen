@@ -1,2 +1,2 @@
-from .schematic import SchematicDataset
+from .schematic import SchematicDataset, SchematicDataModule
 from .scraper import generate_dataset
