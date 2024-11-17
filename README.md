@@ -8,7 +8,7 @@ MineGen is a project that uses deep learning and transformers to generate schema
 
 ### Prerequisites
 
-- Python 3.6+
+- Python 3.9+
 - PyTorch 1.x
 - yacs
 - ignite
