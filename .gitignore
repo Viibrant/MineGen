@@ -160,7 +160,7 @@ cython_debug/
 #.idea/
 
 # Schematic files
-.schematic
+*.schematic
 /schematics
 
 # Omit token for scraping
@@ -175,3 +175,5 @@ data.csv
 # no experiments allowed >:(
 runs/
 lightning_logs/
+
+wandb/

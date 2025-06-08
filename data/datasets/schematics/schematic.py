@@ -3,12 +3,18 @@ from pathlib import PurePosixPath
 from nbtschematic import SchematicFile
 from sklearn.preprocessing import OneHotEncoder
 from torch.utils.data import DataLoader, Dataset, random_split
+import logging
 
 import lightning.pytorch as pl
 import torch
 import torch.nn.functional as F
 import pandas as pd
 import numpy as np
+
+
+logging.getLogger("lightning.pytorch").setLevel(logging.ERROR)
+logger = logging.getLogger("lightning.pytorch.core")
+logger.addHandler(logging.FileHandler("log.txt"))
 
 
 class SchematicDataset(Dataset):
@@ -19,7 +25,7 @@ class SchematicDataset(Dataset):
         transform=None,
         metadata_file: str = "data.csv",
         download=False,
-        **kwargs
+        **kwargs,
     ):
         self.data_dir = schematics_dir
         self.transform = transform
@@ -42,27 +48,30 @@ class SchematicDataset(Dataset):
         return len(self.metadata)
 
     def __getitem__(self, idx, return_metadata=False):
-        # Handle slices
-        if isinstance(idx, slice):
-            start, stop, step = idx.indices(len(self))
-            return [self[i] for i in range(start, stop, step)]
-
         # Get and one-hot encode metadata
         metadata = self.metadata.iloc[idx].to_dict()
         path = PurePosixPath(metadata["Path"])
-        category = self.enc.transform(
-            np.array(metadata["Category"]).reshape(-1, 1)
-        ).toarray()
+        # category = self.enc.transform(
+        #     np.array(metadata["Category"]).reshape(-1, 1)
+        # ).toarray()ath"])
+        # category = self.enc.transform(
+        #     np.array(metadata["Category"]).reshape(-1, 1)
+        # ).toarray()
+
+        category = self.enc.transform([[metadata["Category"]]]).toarray()
 
         # Load schematic and convert to numpy array
         # TODO! Hacky error handling
         while True:
             try:
                 sf = SchematicFile.load(path)
+                logger.debug(f"Loaded schematic at {path}")
                 sf = torch.abs(torch.tensor(sf.blocks).long())
+                logger.debug(f"Converted schematic to tensor")
                 break
-            except Exception as e:
+            except Exception:
                 # Sample a different schematic
+                logger.debug(f"Failed to load schematic at {path}")
                 return self.__getitem__(
                     np.random.randint(0, len(self)), return_metadata=return_metadata
                 )
@@ -126,6 +135,7 @@ class SchematicDataModule(pl.LightningDataModule):
             num_workers=self.num_workers,
             shuffle=True,
             collate_fn=custom_collate_fn,
+            persistent_workers=True,
         )
 
     def val_dataloader(self):
@@ -134,6 +144,7 @@ class SchematicDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             collate_fn=custom_collate_fn,
+            persistent_workers=True,
         )
 
     def test_dataloader(self):
@@ -142,4 +153,5 @@ class SchematicDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             collate_fn=custom_collate_fn,
+            persistent_workers=True,
         )

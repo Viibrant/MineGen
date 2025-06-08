@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import pytorch_lightning as pl
-from layers import conv_block, deconv_block
 from typing import Optional
 
 

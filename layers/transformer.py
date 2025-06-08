@@ -101,6 +101,7 @@ class NestedTransformer(nn.Module):
     """
     lol
     """
+
     def __init__(self, patch_size, embed_dim, num_heads, num_layers, in_channels=None):
         super().__init__()
 
@@ -111,9 +112,11 @@ class NestedTransformer(nn.Module):
         self.num_layers = num_layers
 
         self.pool = nn.MaxPool3d(2)
+        # self.pool = nn.AdaptiveMaxPool3d(2, output_ratio=0.5)
+        
         # TODO: FIGURE THIS OUT
-        # self.positional = Summer(PositionalEncoding3D(embed_dim))
-        self.positional = nn.Identity()
+        self.positional = Summer(PositionalEncoding3D(embed_dim))
+        # self.positional = nn.Identity()
         self.transformer_layers = nn.Sequential(
             *[TransformerLayer(self.in_channels, num_heads) for _ in range(num_layers)]
         )
@@ -127,21 +130,23 @@ class NestedTransformer(nn.Module):
         )
 
     def forward(self, x):
-        x = self.model_patch(x)  # (B, D, H, W, C)
-        B, D, H, W, C = x.shape
+        # Assumes B, C, D, H, W
+        # x = self.model_patch(x)  # (B, D, H, W, C)
+        B, C, D, H, W = x.shape
 
         # Rearrange to (B, T, N, C)
         x = rearrange(
             x,
-            "b (p1 s1) (p2 s2) (p3 s3) c -> b (p1 p2 p3) (s1 s2 s3) c",
+            "b c (p1 s1) (p2 s2) (p3 s3) -> b (p1 p2 p3) (s1 s2 s3) c",
             s1=self.patch_size,
             s2=self.patch_size,
             s3=self.patch_size,
-            b=x.shape[0],
+            b=B,
         )
 
         x = self.transformer_layers(x)
         x = x.reshape(B, C, D, H, W)
         x = self.conv(x)
+        x = self.pool(x)
 
         return x
