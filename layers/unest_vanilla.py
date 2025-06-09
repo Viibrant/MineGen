@@ -5,6 +5,7 @@ from einops import rearrange, Rearrange
 from .block import RearrangeModule
 from .transformer import NestedTransformer
 from .residual import ResidualBlock
+import gc
 
 class Model(nn.Module):
     def __init__(self, patch_size=None, embed_dim=None, num_layers=2, num_heads=8):
@@ -149,22 +150,4 @@ class Model(nn.Module):
         x = self.conv_final(x)
 
         gc.collect()
-
         return x
-
-
-BATCH_SIZE = 1
-loader = DataLoader(raw, batch_size=BATCH_SIZE, shuffle=True)
-SHAPE = (BATCH_SIZE, 1, 128, 128, 128)
-patch_size = 4
-
-torch.cuda.empty_cache()
-model = Model(patch_size=[4, 4, 4], embed_dim=[64, 128, 256]).to(device)
-
-for x, y in loader:    
-#     x = x.abs().to(device)
-#     x_h = model(x)
-
-#     print(x_h.shape)
-#     print(x_h[0][:10, :10, :10])
-#     break
