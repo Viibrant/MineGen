@@ -1,15 +1,18 @@
 from torch import nn
+from typing import Type
 
 
 class ResidualBlock(nn.Module):
+    """3D Residual block with configurable activation and normalization."""
+    
     def __init__(
         self,
-        in_channels,
-        out_channels,
-        kernel_size,
-        stride=1,
-        activation=nn.GELU,
-        norm=nn.BatchNorm3d,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int,
+        stride: int = 1,
+        activation: Type[nn.Module] = nn.GELU,
+        norm: Type[nn.Module] = nn.BatchNorm3d,
     ):
         super().__init__()
         self.block = nn.Sequential(

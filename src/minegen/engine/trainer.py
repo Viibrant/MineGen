@@ -1,16 +1,30 @@
 import logging
+from typing import Any, Optional
 
+import torch
 from ignite.engine import create_supervised_trainer, create_supervised_evaluator, Events
 from ignite.metrics import Accuracy, Loss, RunningAverage
 from ignite.handlers import ModelCheckpoint, Timer
 
+from ..config.models import Config
 
-def train(cfg, model, train_loader, val_loader, optimiser, scheduler, loss_fn):
-    log_period = cfg.SOLVER.LOG_PERIOD
-    checkpoint_period = cfg.SOLVER.CHECKPOINT_PERIOD
-    output_dir = cfg.OUTPUT_DIR
-    device = cfg.MODEL.DEVICE
-    epochs = cfg.SOLVER.MAX_EPOCHS
+
+def train(
+    cfg: Config,
+    model: torch.nn.Module,
+    train_loader: Any,
+    val_loader: Optional[Any],
+    optimiser: torch.optim.Optimizer,
+    scheduler: Optional[Any],
+    loss_fn: Any,
+) -> None:
+    """Train the model using PyTorch Ignite"""
+    
+    log_period = cfg.solver.log_period
+    checkpoint_period = cfg.solver.checkpoint_period
+    output_dir = cfg.output_dir
+    device = cfg.model.device
+    epochs = cfg.solver.max_epochs
 
     logger = logging.getLogger("schematic.train")
     logger.info("Start training")

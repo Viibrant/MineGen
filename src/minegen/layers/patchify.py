@@ -1,29 +1,51 @@
 import torch
 from torch import nn
+from typing import Union, Tuple
 
 
 class Patchify(nn.Module):
-    """Patchify a tensor into smaller patches
-    See: https://stackoverflow.com/a/68360020/5181304"""
+    """
+    Patchify a tensor into smaller patches.
+    See: https://stackoverflow.com/a/68360020/5181304
+    """
 
-    def __init__(self, kernel_size, stride=1, dilation=1, padding=0):
+    def __init__(
+        self, 
+        kernel_size: Union[int, Tuple[int, int, int]], 
+        stride: Union[int, Tuple[int, int, int]] = 1, 
+        dilation: Union[int, Tuple[int, int, int]] = 1, 
+        padding: Union[int, Tuple[int, int, int]] = 0
+    ):
         super().__init__()
 
         self.padding = padding
 
         if isinstance(kernel_size, int):
             self.kernel_size = (kernel_size, kernel_size, kernel_size)
+        else:
+            self.kernel_size = kernel_size
+            
         if isinstance(stride, int):
             self.stride = (stride, stride, stride)
+        else:
+            self.stride = stride
+            
         if isinstance(dilation, int):
             self.dilation = (dilation, dilation, dilation)
+        else:
+            self.dilation = dilation
 
     @staticmethod
-    def _get_dim_blocks(dim_in, kernel_size, padding=0, stride=1, dilation=1):
+    def _get_dim_blocks(
+        dim_in: int, 
+        kernel_size: int, 
+        padding: int = 0, 
+        stride: int = 1, 
+        dilation: int = 1
+    ) -> int:
         return (dim_in + 2 * padding - dilation * (kernel_size - 1) - 1) // stride + 1
 
-    def forward(self, x):
-
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x.contiguous()
 
         channels, depth, height, width = x.shape[-4:]

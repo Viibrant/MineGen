@@ -1,13 +1,17 @@
 import logging
+from typing import Any
 
+import torch
 from ignite.engine import Events, create_supervised_evaluator
 from ignite.metrics import Accuracy
 
+from ..config.models import Config
 
-def inference(cfg, model, val_loader):
+
+def inference(cfg: Config, model: torch.nn.Module, val_loader: Any) -> None:
     """Inference function for the model"""
 
-    device = cfg.MODEL.DEVICE
+    device = cfg.model.device
 
     logger = logging.getLogger("schematic.inference")
     logger.info("Start inference")
@@ -27,4 +31,3 @@ def inference(cfg, model, val_loader):
         )
 
     evaluator.run(val_loader)
-    
