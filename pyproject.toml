@@ -1,0 +1,112 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "minegen"
+dynamic = ["version"]
+description = "Minecraft Schematic Generator using Deep Learning"
+readme = "README.md"
+license = "GPL-3.0"
+requires-python = ">=3.8"
+authors = [
+    { name = "Viibrant", email = "your.email@example.com" },
+]
+keywords = ["minecraft", "deep-learning", "transformers", "schematics"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+]
+
+dependencies = [
+    "torch>=1.13.0",
+    "lightning>=2.0.0",
+    "einops>=0.6.0",
+    "pydantic>=2.0.0",
+    "click>=8.0.0",
+    "pyyaml>=6.0",
+    "numpy>=1.21.0",
+    "pandas>=1.5.0",
+    "tqdm>=4.64.0",
+    "beautifulsoup4>=4.11.0",
+    "requests>=2.28.0",
+    "aiohttp>=3.8.0",
+    "aiofiles>=22.0.0",
+    "httpx>=0.24.0",
+    "nbtschematic>=0.2.0",
+    "scikit-learn>=1.1.0",
+    "wandb>=0.15.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=22.0.0",
+    "isort>=5.10.0",
+    "flake8>=5.0.0",
+    "mypy>=1.0.0",
+    "pre-commit>=2.20.0",
+]
+positional = [
+    "positional-encodings[pytorch]>=6.0.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Viibrant/MineGen"
+Repository = "https://github.com/Viibrant/MineGen"
+Issues = "https://github.com/Viibrant/MineGen/issues"
+
+[project.scripts]
+minegen = "minegen.cli.main:main"
+
+[tool.hatch.version]
+path = "src/minegen/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/minegen"]
+
+[tool.black]
+line-length = 88
+target-version = ['py38']
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+multi_line_output = 3
+line_length = 88
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+strict_equality = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--cov=src/minegen",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
