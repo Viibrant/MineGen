@@ -1,8 +1,7 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import pytorch_lightning as pl
-from layers import conv_block, deconv_block
-from typing import Optional
 
 
 class VAE(pl.LightningModule):
@@ -68,4 +67,9 @@ class VAE(pl.LightningModule):
         recon_x, mu, logvar = self(x)
         recon_loss = F.binary_cross_entropy(recon_x, x, reduction="sum")
         kld_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-        loss = recon_loss
+        loss = recon_loss + kld_loss
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        return loss
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters(), lr=1e-3)

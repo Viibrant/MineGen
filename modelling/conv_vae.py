@@ -5,6 +5,7 @@ Uses a 3D convolutional encoder, followed by a 1D linear layer, followed by a 3D
 
 from torch import nn
 import torch
+import torch.nn.functional as F
 import lightning.pytorch as pl
 from layers import ResidualBlock
 from einops.layers.torch import Rearrange
