@@ -1,0 +1,53 @@
+# Basic MineGen Configuration
+
+model:
+  device: "auto"
+  num_classes: 20
+  latent_dim: 64
+  embedding_size: 512
+  hidden_dim: 256
+  num_heads: 8
+  num_layers: 12
+  patch_size: 8
+
+solver:
+  optimizer_name: "Adam"
+  base_lr: 0.001
+  weight_decay: 0.00001
+  momentum: 0.9
+  bias_lr_factor: 2.0
+  weight_decay_bias: 0.0
+  max_epochs: 100
+  log_period: 10
+  checkpoint_period: 50
+
+datasets:
+  data_dir: "schematics"
+  metadata_file: "data.csv"
+  shape: [16, 16, 16]
+  threshold: null
+  train_split: 0.8
+  val_split: 0.1
+
+dataloader:
+  batch_size: 32
+  num_workers: 4
+  pin_memory: true
+  shuffle: true
+
+scraper:
+  criteria: "most-downloaded"
+  num_pages: 10
+  max_workers: 12
+  schematics_dir: "schematics"
+  errors_file: ".errors.log"
+  cred_file: ".credentials.yml"
+
+dashboard:
+  host: "localhost"
+  port: 8050
+  debug: true
+  auto_refresh: 5
+
+output_dir: "./outputs"
+seed: 42

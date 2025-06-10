@@ -42,12 +42,17 @@ dependencies = [
     "nbtschematic>=0.2.0",
     "scikit-learn>=1.1.0",
     "wandb>=0.15.0",
+    "dash>=2.14.0",
+    "plotly>=5.15.0",
+    "matplotlib>=3.5.0",
+    "seaborn>=0.11.0",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
+    "pytest-asyncio>=0.21.0",
     "black>=22.0.0",
     "isort>=5.10.0",
     "flake8>=5.0.0",
@@ -56,6 +61,10 @@ dev = [
 ]
 positional = [
     "positional-encodings[pytorch]>=6.0.0",
+]
+dashboard = [
+    "dash-bootstrap-components>=1.4.0",
+    "dash-daq>=0.5.0",
 ]
 
 [project.urls]
@@ -110,3 +119,4 @@ addopts = [
     "--cov-report=html",
     "--cov-report=xml",
 ]
+asyncio_mode = "auto"
